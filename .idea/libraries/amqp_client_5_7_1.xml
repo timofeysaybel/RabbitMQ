@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="amqp-client-5.7.1">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/RabbitMQ/amqp-client-5.7.1.jar!/" />
+      <root url="jar://$USER_HOME$/RabbitMQ/slf4j-api-1.7.26.jar!/" />
+      <root url="jar://$USER_HOME$/RabbitMQ/slf4j-simple-1.7.26.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
