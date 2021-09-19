@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="RabbitMQ">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/lib/rabbitmq.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

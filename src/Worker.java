@@ -16,51 +16,51 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.Vector;
+import java.util.concurrent.TimeoutException;
 
 public class Worker
 {
     static Set<String> streets = new HashSet<>();
     static String cmd;
 
-    public static void main(String[] args)
+    static ConnectionFactory factory;
+    static Connection connection;
+    static Channel channel;
+    static String queueName;
+
+    public static void main(String[] args) throws ParserConfigurationException, IOException, SAXException, TimeoutException
     {
-        try
+        if (args == null)
         {
-            if (args == null)
-            {
-                System.err.println("Wrong arguments");
-                return;
-            }
-
-            parseOsm(args[1]);
-            ConnectionFactory factory = new ConnectionFactory();
-            factory.setHost("localhost");
-            Connection connection = factory.newConnection();
-            Channel channel = connection.createChannel();
-
-            String queueName = args[1].substring(0, args[1].indexOf(".osm"));
-            channel.queueDeclare(queueName + "Queue", false, false, false, null);
-            channel.queueDeclare(queueName + "Streets", false, false, false, null);
-
-            while(true)
-            {
-                DeliverCallback deliverCallback = (consumerTag, delivery) ->
-                {
-                    cmd = new String(delivery.getBody(), StandardCharsets.UTF_8);
-                };
-                channel.basicConsume(queueName + "Queue", true, deliverCallback, consumerTag -> {});
-
-                if (cmd.equals("exit"))
-                    break;
-
-                channel.basicPublish("", queueName + "Streets", null, String.join(" ", streets).getBytes(StandardCharsets.UTF_8));
-            }
+            System.err.println("Wrong arguments");
+            return;
         }
-        catch (Exception e)
+
+        parseOsm(args[0]);
+        queueName = args[0].substring(0, args[0].indexOf(".osm"));
+
+        factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        connection = factory.newConnection();
+        channel = connection.createChannel();
+
+        channel.queueDeclare(queueName + "Queue", false, false, false, null);
+        channel.queueDeclare(queueName + "Streets", false, false, false, null);
+
+        DeliverCallback deliverCallback = (consumerTag, delivery) ->
         {
-            System.err.println("Error!");
-            e.printStackTrace();
-        }
+            cmd = new String(delivery.getBody(), StandardCharsets.UTF_8);
+            byte[] msg = String.join(" ", getStreets(cmd)).getBytes(StandardCharsets.UTF_8);
+            if (cmd.equals("exit"))
+            {
+                channel.queueDelete(queueName + "Queue");
+                channel.queueDelete(queueName + "Streets");
+                connection.close();
+            }
+            channel.basicPublish("", queueName + "Streets", null, msg);
+        };
+        channel.basicConsume(queueName + "Queue", true, deliverCallback, consumerTag -> {});
     }
 
     public static void parseOsm(String filename) throws ParserConfigurationException, IOException, SAXException
@@ -91,5 +91,16 @@ public class Worker
                 }
             }
         }
+    }
+
+    public static Vector<String> getStreets(String prefix)
+    {
+        Vector<String> res = new Vector<>();
+
+        for (String street : streets)
+            if (street.startsWith(prefix))
+                res.add(street);
+
+        return res;
     }
 }

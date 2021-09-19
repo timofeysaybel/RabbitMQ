@@ -1,20 +1,22 @@
 import com.rabbitmq.client.*;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.TimeoutException;
 
 import util.mapUtil;
 
 public class Main
 {
-    static Map<String, String[]> streets;
+    static Map<String, String[]> streets = new HashMap<>();
     static String[] queueNames;
     static ConnectionFactory factory = new ConnectionFactory();
+    static Process[] processes;
+    static int finalI;
+    static String cmd;
 
-    public static void main(String[] args)
+    public static void main(String[] args) throws IOException, TimeoutException, InterruptedException
     {
         if (args == null)
         {
@@ -22,31 +24,53 @@ public class Main
         }
 
         init(args);
+        createWorkers(args);
 
         factory.setHost("localhost");
-        try (Connection connection = factory.newConnection(); Channel channel = connection.createChannel())
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+        try
         {
             queueDeclare(channel);
             System.out.println("Start");
-            BufferedReader s = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-            String cmd;
+            Scanner s = new Scanner(System.in);
 
-            while ((cmd = s.readLine()) != null)
+            while (true)
             {
-                if (cmd.toLowerCase(Locale.ROOT).equals("exit"))
+                cmd = s.nextLine();
+                if (cmd == null || cmd.equals("exit"))
                     break;
 
                 basicPublish(channel, cmd);
                 consume(channel);
                 printStreets();
+                streets.clear();
             }
 
             basicPublish(channel, "exit");
+            queueDelete(channel);
+            connection.close();
         }
         catch (Exception e)
         {
-            System.err.println("!Error: ");
+            System.err.println("Error: ");
             e.printStackTrace();
+            basicPublish(channel, "exit");
+            queueDelete(channel);
+            connection.close();
+        }
+
+        //waitForWorkers();
+    }
+
+    protected static void printStreets()
+    {
+        System.out.println(ANSI_BLUE + "Streets:" + ANSI_RESET);
+        for(String key : streets.keySet())
+        {
+            System.out.println(ANSI_PURPLE + key + ANSI_RESET);
+            for (String city : streets.get(key))
+                System.out.println(city);
         }
     }
 
@@ -61,9 +85,22 @@ public class Main
         }
     }
 
-    protected static void createWorkers()
+    protected static void createWorkers(String[] args) throws IOException
     {
+        processes = new Process[args.length];
 
+        for (int i = 0; i < args.length; i++)
+        {
+            ProcessBuilder processBuilder = new ProcessBuilder();
+            processBuilder.command("java", "-cp", "\".:./../lib/rabbitmq.jar\"", "Worker", args[i]);
+            processes[i] = processBuilder.start();
+        }
+    }
+
+    protected static void waitForWorkers() throws InterruptedException
+    {
+        for (Process p : processes)
+            p.wait();
     }
 
     protected static void queueDeclare(Channel channel) throws IOException
@@ -75,27 +112,36 @@ public class Main
         }
     }
 
+    protected static void queueDelete(Channel channel) throws IOException
+    {
+        for (String queue : queueNames)
+        {
+            channel.queueDelete(queue + "Queue");
+            channel.queueDelete(queue + "Streets");
+        }
+    }
+
     protected static void basicPublish(Channel channel, String cmd) throws IOException
     {
         for (String queueName : queueNames)
             channel.basicPublish("", queueName + "Queue", null, cmd.getBytes(StandardCharsets.UTF_8));
     }
 
-    protected static void consume(Channel channel) throws IOException
+    protected static void consume(Channel channel) throws IOException, InterruptedException
     {
-        for (int i = 1; i < queueNames.length; i += 2)
+        for (int i = 0; i < queueNames.length; i++)
         {
-            int finalI = i;
+            finalI = i;
             DeliverCallback deliverCallback = (consumerTag, delivery) ->
             {
                 String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-                streets.put(queueNames[finalI],  message.split(" "));
+                streets.put(queueNames[finalI], message.split(" "));
             };
-            channel.basicConsume(queueNames[i] + "Streets", true, deliverCallback, consumerTag -> {});
+            channel.basicConsume(queueNames[finalI] + "Streets", true, deliverCallback, consumerTag -> {});
         }
     }
 
-    protected static void printStreets()
+    /*protected static void printStreets()
     {
         streets = mapUtil.sortMapByValueSize(streets);
 
@@ -120,7 +166,7 @@ public class Main
             }
             System.out.println();
         }
-    }
+    }*/
 
     public static final String ANSI_RESET = "\u001B[0m";
     public static final String ANSI_BLACK = "\u001B[30m";
