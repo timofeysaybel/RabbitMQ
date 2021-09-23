@@ -1,8 +1,8 @@
 build:
-	javac -cp ".:./lib/rabbitmq.jar" src/*.java src/util/*.java
+	javac -cp ".:./lib/rabbitmq.jar" src/*.java
 
 clean:
-	rm src/*.class src/util/*.class
+	rm src/*.class
 
 runMain:
 	java -cp "src:./lib/rabbitmq.jar" Main cities/portland.osm

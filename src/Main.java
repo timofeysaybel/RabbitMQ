@@ -1,39 +1,42 @@
 import com.rabbitmq.client.*;
 
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.TimeoutException;
-
-import util.mapUtil;
 
 public class Main
 {
-    static Map<String, String[]> streets = new HashMap<>();
-    static String[] queueNames;
-    static ConnectionFactory factory = new ConnectionFactory();
-    static Process[] processes;
-    static int finalI;
-    static String cmd;
+    private static String[] queueNames;
+    private static Process[] processes;
+    private static String cmd;
 
-    public static void main(String[] args) throws IOException, TimeoutException, InterruptedException
+    private static Connection connection;
+    private static Channel channel;
+
+    public static void main(String[] args) throws IOException, InterruptedException
     {
-        if (args == null)
+        if (args.length == 0)
         {
+            System.err.println(ANSI_RED + "Wrong arguments:\n" +
+                    "\tmissed osm files" + ANSI_RESET);
             return;
         }
 
         init(args);
-        createWorkers(args);
-
-        factory.setHost("localhost");
-        Connection connection = factory.newConnection();
-        Channel channel = connection.createChannel();
         try
         {
+            createSubprocesses(args);
+
+            ConnectionFactory factory = new ConnectionFactory();
+            factory.setHost("localhost");
+            connection = factory.newConnection();
+            channel = connection.createChannel();
+
             queueDeclare(channel);
-            System.out.println("Start");
+
             Scanner s = new Scanner(System.in);
+            System.out.println(ANSI_GREEN + "Started:");
+            System.out.println("Enter an empty string to show all streets");
 
             while (true)
             {
@@ -43,38 +46,29 @@ public class Main
 
                 basicPublish(channel, cmd);
                 consume(channel);
-                printStreets();
-                streets.clear();
             }
-
-            basicPublish(channel, "exit");
-            queueDelete(channel);
-            connection.close();
         }
         catch (Exception e)
         {
-            System.err.println("Error: ");
+            System.err.println(ANSI_RED + "Error: " + ANSI_RED);
             e.printStackTrace();
             basicPublish(channel, "exit");
             queueDelete(channel);
-            connection.close();
+            if (connection != null)
+                connection.close();
+            waitFor();
         }
-
-        //waitForWorkers();
-    }
-
-    protected static void printStreets()
-    {
-        System.out.println(ANSI_BLUE + "Streets:" + ANSI_RESET);
-        for(String key : streets.keySet())
+        finally
         {
-            System.out.println(ANSI_PURPLE + key + ANSI_RESET);
-            for (String city : streets.get(key))
-                System.out.println(city);
+            basicPublish(channel, "exit");
+            queueDelete(channel);
+            if (connection != null)
+                connection.close();
+            waitFor();
         }
     }
 
-    protected static void init(String[] args)
+    private static void init(String[] args)
     {
         queueNames = new String[args.length];
 
@@ -85,34 +79,60 @@ public class Main
         }
     }
 
-    protected static void createWorkers(String[] args) throws IOException
-    {
-        processes = new Process[args.length];
-
-        for (int i = 0; i < args.length; i++)
-        {
-            ProcessBuilder processBuilder = new ProcessBuilder();
-            processBuilder.command("java", "-cp", "\".:./../lib/rabbitmq.jar\"", "Worker", args[i]);
-            processes[i] = processBuilder.start();
-        }
-    }
-
-    protected static void waitForWorkers() throws InterruptedException
-    {
-        for (Process p : processes)
-            p.wait();
-    }
-
-    protected static void queueDeclare(Channel channel) throws IOException
+    private static void queueDeclare(Channel channel) throws IOException
     {
         for (String queue : queueNames)
         {
-            channel.queueDeclare(queue + "Queue", false, false, false, null);
-            channel.queueDeclare(queue + "Streets", false, false, false, null);
+            channel.queueDeclare(queue + "Queue", true, false, false, null);
+            channel.queueDeclare(queue + "Streets", true, false, false, null);
         }
     }
 
-    protected static void queueDelete(Channel channel) throws IOException
+    private static void basicPublish(Channel channel, String cmd) throws IOException
+    {
+        for (String queueName : queueNames)
+            channel.basicPublish("", queueName + "Queue", MessageProperties.PERSISTENT_TEXT_PLAIN,
+                                    cmd.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void consume(Channel channel) throws IOException
+    {
+        for (String queueName : queueNames)
+        {
+            Consumer consumer = new DefaultConsumer(channel)
+            {
+                @Override
+                public void handleDelivery(String consumerTag, Envelope envelope,
+                                           AMQP.BasicProperties properties, byte[] body) throws IOException
+                {
+                    String msg = new String(body, StandardCharsets.UTF_8);
+
+                    String cityName = queueName.substring(queueName.lastIndexOf("/") + 1);
+                    cityName = cityName.substring(0, 1).toUpperCase(Locale.ROOT) + cityName.substring(1);
+                    System.out.print(ANSI_PURPLE + cityName + " has ");
+
+
+                    if (msg.isEmpty() || msg.equals(" "))
+                        System.out.println("no streets beginning with \"" + cmd + "\"" + ANSI_RESET);
+                    else
+                    {
+                        String[] tmp = msg.split(" ");
+                        String streets = String.join(", ", tmp);
+                        if (cmd.equals(""))
+                            System.out.println(tmp.length + " streets:");
+                        else
+                            System.out.println(tmp.length + " street" + (tmp.length == 1 ? "" : "s") +
+                                                " beginning with \"" + cmd + "\":");
+
+                        System.out.println(ANSI_CYAN + streets + ANSI_RESET + "");
+                    }
+                }
+            };
+            channel.basicConsume(queueName + "Streets", true, consumer);
+        }
+    }
+
+    private static void queueDelete(Channel channel) throws IOException
     {
         for (String queue : queueNames)
         {
@@ -121,60 +141,25 @@ public class Main
         }
     }
 
-    protected static void basicPublish(Channel channel, String cmd) throws IOException
+    private static void createSubprocesses(String[] args) throws IOException
     {
-        for (String queueName : queueNames)
-            channel.basicPublish("", queueName + "Queue", null, cmd.getBytes(StandardCharsets.UTF_8));
+        String arguments = "-cp out/production/RabbitMQ/.:./lib/rabbitmq.jar Worker ";
+        Runtime run = Runtime.getRuntime();
+        processes = new Process[args.length];
+
+        for (int i = 0; i < args.length; i++)
+            processes[i] = run.exec("java " + arguments + args[i]);
     }
 
-    protected static void consume(Channel channel) throws IOException, InterruptedException
+    private static void waitFor() throws InterruptedException
     {
-        for (int i = 0; i < queueNames.length; i++)
-        {
-            finalI = i;
-            DeliverCallback deliverCallback = (consumerTag, delivery) ->
-            {
-                String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-                streets.put(queueNames[finalI], message.split(" "));
-            };
-            channel.basicConsume(queueNames[finalI] + "Streets", true, deliverCallback, consumerTag -> {});
-        }
+        for (Process process : processes)
+            process.waitFor();
     }
 
-    /*protected static void printStreets()
-    {
-        streets = mapUtil.sortMapByValueSize(streets);
-
-        int columnCount = streets.size();
-        int lines = columnCount / 3;
-
-        Vector<String> cities = new Vector<>(streets.keySet());
-        Vector<String[]> streetsOfCities = (Vector<String[]>) streets.values();
-
-        int[] amountOfColumnsInLine = new int[lines];
-        for (int i = 0; i < lines - 1; i++)
-            amountOfColumnsInLine[i] = 3;
-        amountOfColumnsInLine[lines - 1] = columnCount % 3;
-
-        for (int i = 0; i < lines; i++)
-        {
-            for (int j = 0; j < amountOfColumnsInLine[i]; j++)
-            {
-                System.out.print(ANSI_BLUE + cities.elementAt(i * 3 + j) + ANSI_RESET + "\t");
-                for (String street : streetsOfCities.elementAt(i * 3 + j))
-                    System.out.print(street + "\t");
-            }
-            System.out.println();
-        }
-    }*/
-
-    public static final String ANSI_RESET = "\u001B[0m";
-    public static final String ANSI_BLACK = "\u001B[30m";
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_YELLOW = "\u001B[33m";
-    public static final String ANSI_BLUE = "\u001B[34m";
-    public static final String ANSI_PURPLE = "\u001B[35m";
-    public static final String ANSI_CYAN = "\u001B[36m";
-    public static final String ANSI_WHITE = "\u001B[37m";
+    private static final String ANSI_RESET = "\u001B[0m";
+    private static final String ANSI_RED = "\u001B[31m";
+    private static final String ANSI_GREEN = "\u001B[32m";
+    private static final String ANSI_PURPLE = "\u001B[35m";
+    private static final String ANSI_CYAN = "\u001B[36m";
 }
