@@ -4,7 +4,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-public class Main
+public class  Main
 {
     private static String[] queueNames;
     private static Process[] processes;
@@ -70,12 +70,29 @@ public class Main
 
     private static void init(String[] args)
     {
-        queueNames = new String[args.length];
-
-        for (int i = 0; i < args.length; i++)
+        if (args[0].endsWith("*.osm"))
         {
-            String tmp = args[i].substring(0, args[i].indexOf(".osm"));
-            queueNames[i] = tmp;
+            File dir = new File(args[0].substring(0, args[0].lastIndexOf("*.osm") - 1));
+            File[] files = dir.listFiles();
+            assert files != null;
+            queueNames = new String[files.length];
+            for (int i = 0; i < files.length; i++)
+            {
+                if (!files[i].toString().endsWith(".osm"))
+                    continue;
+                String tmp = files[i].toString().substring(files[i].toString().lastIndexOf("/") + 1, files[i].toString().indexOf(".osm"));
+                queueNames[i] = tmp;
+            }
+        }
+        else
+        {
+            queueNames = new String[args.length];
+
+            for (int i = 0; i < args.length; i++)
+            {
+                String tmp = args[i].substring(0, args[i].indexOf(".osm"));
+                queueNames[i] = tmp;
+            }
         }
     }
 
@@ -83,7 +100,7 @@ public class Main
     {
         for (String queue : queueNames)
         {
-            channel.queueDeclare(queue + "Queue", true, false, false, null);
+            channel.queueDeclare(queue + "Query", true, false, false, null);
             channel.queueDeclare(queue + "Streets", true, false, false, null);
         }
     }
@@ -91,7 +108,7 @@ public class Main
     private static void basicPublish(Channel channel, String cmd) throws IOException
     {
         for (String queueName : queueNames)
-            channel.basicPublish("", queueName + "Queue", MessageProperties.PERSISTENT_TEXT_PLAIN,
+            channel.basicPublish("", queueName + "Query", MessageProperties.PERSISTENT_TEXT_PLAIN,
                                     cmd.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -116,7 +133,7 @@ public class Main
                         System.out.println("no streets beginning with \"" + cmd + "\"" + ANSI_RESET);
                     else
                     {
-                        String[] tmp = msg.split(" ");
+                        String[] tmp = msg.split("@");
                         String streets = String.join(", ", tmp);
                         if (cmd.equals(""))
                             System.out.println(tmp.length + " streets:");
@@ -145,13 +162,36 @@ public class Main
     {
         String arguments = "-cp out/production/RabbitMQ/.:./lib/rabbitmq.jar Worker ";
         Runtime run = Runtime.getRuntime();
-        processes = new Process[args.length];
+        if (args[0].endsWith("*.osm"))
+        {
+            File dir = new File(args[0].substring(0, args[0].lastIndexOf("*.osm") - 1));
+            File[] files = dir.listFiles();
+            assert files != null;
+            processes = new Process[files.length];
 
-        for (int i = 0; i < args.length; i++)
-            processes[i] = run.exec("java " + arguments + args[i]);
+            for (int i = 0; i < files.length; i++)
+            {
+                if (!files[i].toString().endsWith(".osm"))
+                    continue;
+                String tmp = files[i].toString();
+                processes[i] = run.exec("java " + arguments + tmp);
+                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(processes[i].getInputStream()));
+                String t;
+                t = bufferedReader.readLine();
+                System.out.println(t);
+            }
+        }
+        else
+        {
+            processes = new Process[args.length];
+
+            for (int i = 0; i < args.length; i++)
+                processes[i] = run.exec("java " + arguments + args[i]);
+        }
     }
 
     private static void waitFor() throws InterruptedException
+    4
     {
         for (Process process : processes)
             process.waitFor();

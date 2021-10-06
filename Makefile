@@ -1,11 +1,11 @@
 build:
-	javac -cp ".:./lib/rabbitmq.jar" src/*.java
+	mkdir out out/production out/production/RabbitMQ && javac -cp ".:./lib/rabbitmq.jar" src/*.java -d out/production/RabbitMQ
 
 clean:
-	rm src/*.class
+	rm -r out
 
 runMain:
-	java -cp "src:./lib/rabbitmq.jar" Main cities/portland.osm
+	java -cp "out/production/RabbitMQ/.:./lib/rabbitmq.jar" Main 
 
 runWorker:
-	java -cp "src:./lib/rabbitmq.jar" Worker cities/portland.osm
+	java -cp "out/production/RabbitMQ:./lib/rabbitmq.jar" Worker cities/tampa.osm

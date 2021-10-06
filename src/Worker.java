@@ -48,7 +48,7 @@ public class Worker
             connection = factory.newConnection();
             channel = connection.createChannel();
 
-            channel.queueDeclare(queueName + "Queue", true, false, false, null);
+            channel.queueDeclare(queueName + "Query", true, false, false, null);
             channel.queueDeclare(queueName + "Streets", true, false, false, null);
 
             Consumer consumer = new DefaultConsumer(channel)
@@ -60,7 +60,7 @@ public class Worker
                     handleQuery(body);
                 }
             };
-            channel.basicConsume(queueName + "Queue", true, consumer);
+            channel.basicConsume(queueName + "Query", true, consumer);
 
         }
         catch (Exception e)
@@ -81,7 +81,9 @@ public class Worker
         }
         else
         {
-            byte[] msg = String.join(" ", getStreets(cmd)).getBytes(StandardCharsets.UTF_8);
+            String message = getMsg(getStreets(cmd));
+            System.out.println(message);
+            byte[] msg = message.getBytes(StandardCharsets.UTF_8);
             channel.basicPublish("", queueName + "Streets", MessageProperties.PERSISTENT_TEXT_PLAIN, msg);
         }
     }
@@ -108,7 +110,7 @@ public class Worker
                     if (node1.getNodeType() == Node.ELEMENT_NODE)
                     {
                         Element element1 = (Element) node1;
-                        if (element1.getAttribute("k").equals("highway"))
+                        if (element1.getAttribute("k").equals("name"))
                             streets.add(element1.getAttribute("v"));
                     }
                 }
@@ -127,6 +129,15 @@ public class Worker
             if (street.startsWith(prefix))
                 res.add(street);
 
+        return res;
+    }
+
+    private static String getMsg(Vector<String> cmd)
+    {
+        String res = "";
+        for (int i = 0; i < cmd.size() - 1; i++)
+            res = res.concat(cmd.elementAt(i) + "@");
+        res = res.concat(cmd.elementAt(cmd.size() - 1));
         return res;
     }
 }
